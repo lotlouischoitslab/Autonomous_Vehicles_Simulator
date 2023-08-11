@@ -53,10 +53,10 @@ class AutonomousVehicleEnv(gym.Env):
         super().__init__()
 
         # Define action space (acceleration: -1, 0, 1)
-        self.action_space = spaces.Discrete(3)
+        self.action_space = [-1,0,1]
 
         # Define observation space (distance, relative_speed)
-        self.observation_space = spaces.Box(low=np.array([0, -10]), high=np.array([100, 10]), dtype=np.float32)
+        self.observation_space = spaces.Box(low=np.array([0, -10]), high=np.array([100, 10]))
 
         self.reset()
 
@@ -82,7 +82,7 @@ class AutonomousVehicleEnv(gym.Env):
         elif 10 < self.distance < 50:  # Safe distance reward
             reward = 10 - abs(self.relative_speed)
 
-        return np.array([self.distance, self.relative_speed]), reward, done, {}
+        return np.array([self.distance, self.relative_speed]), reward, done
 
     def render(self, mode='human'):
         print(f"Distance: {self.distance:.2f}, Relative Speed: {self.relative_speed:.2f}")
@@ -103,3 +103,103 @@ class DeepQNetwork(nn.Module):
         x = F.relu(self.layer2(x))
         x = self.layer3(x)
         return x 
+
+
+class Agent:
+    def __init__(self,gamma,epsilon,epsilon_min,epsilon_dec,lr,mem_size=100000000):
+        self.env = AutonomousVehicleEnv() 
+        self.input_dims = self.env.observation_space.shape[0]
+        self.hidden_dims = 128
+        self.output_dims = len(self.env.action_space)
+        self.model = DeepQNetwork(self.input_dims,self.hidden_dims,self.output_dims)
+        self.gamma = gamma 
+        self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_dec = epsilon_dec
+        self.lr = lr 
+        self.loss_fn = nn.MSELoss() 
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr) # Create an optimizer
+        self.memory = PrioritizedReplayBuffer(mem_size, self.input_dims, self.output_dims)
+        self.scores = [] # Store all the total rewards
+        self.steps = [] # Store all the step values
+        self.episodes = [] # Store the episodes
+        self.avg_episodes = [0.0] # Store every 10 episodes for average rewards
+        self.avg_rewards = [0.0] # Store all the average values
+        self.beta = 0.4 # Store the initial beta value
+        self.beta_end = 1.0 # Store the final beta value
+        self.beta_increment = 0.0001 # Slowly increment the beta value 
+        self.batch_size = 64 # Assign the batch size
+
+    def update_epsilon(self): # Update the epsilon value
+        self.epsilon = max(self.epsilon * self.epsilon_dec, self.epsilon_min) 
+
+    def learn(self):
+        if self.memory.mem_cntr < self.batch_size:
+            return
+
+        print('louis')
+        # Step 1: Sample from the prioritized replay buffer
+        states, actions, rewards, next_states, dones, indices, weights = self.memory.sample_buffer(self.batch_size, beta)
+
+        states = torch.tensor(states, device=self.model.device).float()
+        actions = torch.tensor(actions, device=self.model.device).long()
+        rewards = torch.tensor(rewards, device=self.model.device).float()
+        next_states = torch.tensor(next_states, device=self.model.device).float()
+        dones = torch.tensor(dones, device=self.model.device).bool()
+        weights = torch.tensor(weights, device=self.model.device).float()
+
+        # Step 2: Compute Q-values
+        q_eval = self.model(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
+        q_next = self.target(next_states).detach()
+        max_actions = q_next.argmax(dim=1)
+        q_next[dones] = 0.0
+        q_target = rewards + self.gamma * q_next.gather(1, max_actions.unsqueeze(-1)).squeeze(-1)
+
+        # Step 3: Calculate TD errors
+        errors = (q_target - q_eval).detach().cpu().numpy()
+        self.memory.set_priorities(indices, errors)
+
+        # Step 4 & 5: Adjust Q-value updates with importance-sampling weights and calculate the loss
+        loss = self.loss(q_eval, q_target)
+        weighted_loss = (weights * loss).mean()
+
+        # Step 6: Perform gradient descent
+        self.optimizer.zero_grad()
+        weighted_loss.backward()
+        self.optimizer.step()
+
+        # Step 7: Update beta
+        self.beta = min(self.beta + self.beta_increment, self.beta_end)
+
+    def select_action(self, state): # Select action
+        if np.random.rand() < self.epsilon: # Epsilon-Greedy
+            return np.random.choice(self.env.action_space)
+        else:
+            q_values = self.model(torch.tensor(state)) # Get the q-values
+            action = torch.argmax(q_values[0]).item()
+            return action # return the action value
+
+
+    def train(self, episodes): # Train the agent
+        for episode in range(episodes): # Total reward for each episode
+            total_reward = 0 # Initialize the total reward
+            done = False # Terminal condition is set to False
+            state = self.env.reset() # Reset the state 
+            avg_reward = 0 # Initialize the average reward
+            steps = 0 # Initial the total steps
+
+            while not done: # While not done
+                action = self.select_action(state) # select an action
+                next_state, reward, done = self.env.step(action) # call the step function
+                total_reward = total_reward + reward  # accumulate the rewards
+                self.learn() # call the learn function
+                self.update_epsilon() # update the epsilon value
+                state = next_state # assign the next state to the current state
+                steps += 1 # increment the steps
+                
+
+            self.episodes.append(episode+1) # store the episode values
+            self.scores.append(total_reward) # store the total reward
+            self.steps.append(steps) # store the step value
+
+            print(f'Episode: {episode+1} | Total Reward: {total_reward} | Epsilon: {self.epsilon}') # print out the variables
