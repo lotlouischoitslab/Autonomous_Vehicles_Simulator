@@ -1,7 +1,7 @@
 '''
 Project: Autonomous Vehicles Simulator using Deep Reinforcement Learning
 Author: Louis Sungwoo Cho
-Date Created: 5/22/2023
+Date Created: 8/11/2023
 '''
 
 from src.utils import DeepQNetwork 
