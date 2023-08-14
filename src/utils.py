@@ -14,7 +14,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 
 class PrioritizedReplayBuffer:
-    def __init__(self, max_mem_size, input_dims, n_actions, alpha=0.6):
+    def __init__(self, max_mem_size, input_dims, n_actions, alpha=0.3):
         self.mem_size = max_mem_size
         self.mem_cntr = 0
         self.alpha = alpha
@@ -88,17 +88,12 @@ class AutonomousVehicleEnv(gym.Env):
         # Previous distance
         prev_distance = self.distance
 
-        #acceleration = (action - 1) % len(self.action_space)  
         acceleration = (action - 1)
 
         # Reward calculation
         if self.distance >= self.goal_distance:  # Assumes that 0 is the goal distance
             reward = 100
             done = True
-        elif self.distance < prev_distance:  # Car got closer to the goal
-            reward = 10
-            self.relative_speed += abs(acceleration)
-            self.distance += self.relative_speed
         else:  # Car either stayed in the same position or moved away
             reward = -1
             self.relative_speed += abs(acceleration)
@@ -121,7 +116,7 @@ class AutonomousVehicleEnv(gym.Env):
         pygame.draw.rect(self.screen, (255, 0, 0), (self.main_car_x, self.main_car_y - self.distance, self.car_width, self.car_height))
 
         # Display state info
-        state_text = self.font.render(f"Distance: {self.distance:.2f}, Relative Speed: {self.relative_speed:.2f}", True, (0, 0, 0))
+        state_text = self.font.render(f"Distance: {self.distance:.2f} m | Relative Speed: {self.relative_speed:.2f} m/s", True, (0, 0, 0))
         self.screen.blit(state_text, (10, 10))
         
         pygame.display.flip()
@@ -211,8 +206,6 @@ class Agent:
         # Increase beta towards 1.0, for prioritized experience replay
         self.beta = min(self.beta + self.beta_increment, self.beta_end)
 
-        # Update epsilon
-        self.update_epsilon()
 
 
 
@@ -241,9 +234,10 @@ class Agent:
                 total_reward = total_reward + reward  # accumulate the rewards            
                 state = next_state # assign the next state to the current state
                 steps += 1 # increment the steps
-                
                 self.learn() # call the learn function
-                #self.update_epsilon() # update the epsilon value
+                self.update_epsilon()
+                
+
             self.episodes.append(episode+1) # store the episode values
             self.scores.append(total_reward) # store the total reward
             self.steps.append(steps) # store the step value
