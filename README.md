@@ -49,9 +49,9 @@ These metrics are visualized using matplotlib, allowing for a comprehensive unde
 ### Applications:
 While this project presents a simplified representation, the concepts and methodologies can be scaled and applied to more complex autonomous driving scenarios, urban environments, and multi-agent systems.
 
-Libraries and Tools:
+### Libraries and Tools:
 
-PyTorch: For building and training the neural network.
-gym: To define the reinforcement learning environment.
-pygame: For visualizing the environment and rendering graphics.
-numpy and matplotlib: For numerical operations and visualization, respectively.
+- PyTorch: For building and training the neural network.
+- gym: To define the reinforcement learning environment.
+- pygame: For visualizing the environment and rendering graphics.
+- numpy and matplotlib: For numerical operations and visualization, respectively.
