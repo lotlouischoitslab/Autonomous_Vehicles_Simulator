@@ -8,6 +8,7 @@ import random
 import gym 
 from gym import spaces
 from collections import deque
+import pygame 
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
@@ -22,6 +23,8 @@ class PrioritizedReplayBuffer:
     
     def store_transition(self, state, action, reward, next_state, done):
         max_priority = max(self.priorities, default=1)  # Default to 1 for the first transition
+        self.mem_cntr += 1
+        self.mem_cntr = self.mem_cntr % self.mem_size
         self.transitions.append((state, action, reward, next_state, done))
         self.priorities.append(max_priority)
 
@@ -56,39 +59,77 @@ class AutonomousVehicleEnv(gym.Env):
         self.action_space = [-1,0,1]
 
         # Define observation space (distance, relative_speed)
-        self.observation_space = spaces.Box(low=np.array([0, -10]), high=np.array([100, 10]))
+        self.observation_space = spaces.Box(low=np.array([0, -100]), high=np.array([100, 10]))
 
         self.reset()
 
+                # pygame setup
+        pygame.init()
+        self.screen = pygame.display.set_mode((800, 600))
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont(None, 36)
+
+        # car positions and sizes
+        self.car_width, self.car_height = 70, 40
+        self.leading_car_x = 400
+        self.leading_car_y = 100
+        self.main_car_x = 400
+        self.main_car_y = 500
+
     def reset(self):
         # Initialize distance and relative speed
-        self.distance = np.random.uniform(30, 70)
+        self.distance = np.random.uniform(-30, 70)
         self.relative_speed = np.random.uniform(-5, 5)
         return np.array([self.distance, self.relative_speed])
 
     def step(self, action):
+        # Previous distance
+        prev_distance = self.distance
+
         acceleration = action - 1  # Map 0, 1, 2 to -1, 0, 1
 
         # Update state
         self.relative_speed += acceleration
         self.distance += self.relative_speed
 
-        # Check for collision
+        # Reward calculation
+        if self.distance == 100: # Assumes that 0 is the goal distance
+            reward = 100
+        elif self.distance < prev_distance:  # Car got closer to the goal
+            reward = 10
+        else:  # Car either stayed in the same position or moved away
+            reward = -1
+
+        # Check for terminal conditions, such as collisions or reaching a max episode length
         done = False
-        reward = 0
-        if self.distance <= 0:
-            reward = -100
+        if self.distance <= 0: # The car has arrived at or passed the goal
             done = True
-        elif 10 < self.distance < 50:  # Safe distance reward
-            reward = 10 - abs(self.relative_speed)
 
         return np.array([self.distance, self.relative_speed]), reward, done
 
+
     def render(self, mode='human'):
-        print(f"Distance: {self.distance:.2f}, Relative Speed: {self.relative_speed:.2f}")
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+
+        # Fill screen
+        self.screen.fill((255, 255, 255))
+        
+        # Draw cars
+        pygame.draw.rect(self.screen, (0, 0, 255), (self.leading_car_x, self.leading_car_y, self.car_width, self.car_height))
+        pygame.draw.rect(self.screen, (255, 0, 0), (self.main_car_x, self.main_car_y - self.distance, self.car_width, self.car_height))
+
+        # Display state info
+        state_text = self.font.render(f"Distance: {self.distance:.2f}, Relative Speed: {self.relative_speed:.2f}", True, (0, 0, 0))
+        self.screen.blit(state_text, (10, 10))
+        
+        pygame.display.flip()
+        self.clock.tick(30)
 
     def close(self):
-        pass
+        pygame.quit()
+ 
 
 
 class DeepQNetwork(nn.Module):
@@ -123,7 +164,7 @@ class Agent:
         self.scores = [] # Store all the total rewards
         self.steps = [] # Store all the step values
         self.episodes = [] # Store the episodes
-        self.avg_episodes = [0.0] # Store every 10 episodes for average rewards
+        self.avg_episodes = [1] # Store every 10 episodes for average rewards
         self.avg_rewards = [0.0] # Store all the average values
         self.beta = 0.4 # Store the initial beta value
         self.beta_end = 1.0 # Store the final beta value
@@ -175,7 +216,7 @@ class Agent:
         if np.random.rand() < self.epsilon: # Epsilon-Greedy
             return np.random.choice(self.env.action_space)
         else:
-            q_values = self.model(torch.tensor(state)) # Get the q-values
+            q_values = self.model(torch.tensor(state, dtype=torch.float32)) # Get the q-values
             action = torch.argmax(q_values[0]).item()
             return action # return the action value
 
@@ -189,6 +230,7 @@ class Agent:
             steps = 0 # Initial the total steps
 
             while not done: # While not done
+                self.env.render()
                 action = self.select_action(state) # select an action
                 next_state, reward, done = self.env.step(action) # call the step function
                 total_reward = total_reward + reward  # accumulate the rewards
@@ -203,3 +245,46 @@ class Agent:
             self.steps.append(steps) # store the step value
 
             print(f'Episode: {episode+1} | Total Reward: {total_reward} | Epsilon: {self.epsilon}') # print out the variables
+
+            if (episode+1) % 100 == 0: # for each 10 episodes
+                self.save_model(os.path.join('models', 'rl_model' + str(episode+1))) # save the model
+                self.avg_episodes.append(episode+1) # store the average rewards
+                avg_reward = np.mean(self.scores[-10:]) # get the mean reward value
+                self.avg_rewards.append(avg_reward) # store the average reward
+                self.plot_training_progress(episode+1) # plot the training progress
+                print(f'Average Reward: {avg_reward}') # print the average reward
+
+
+    def save_model(self, file_name): # Function to save the model
+        torch.save(self.model.state_dict(), file_name + "_model.pt")
+
+    def load_model(self, file_name): # Function to load the model
+        self.model.load_state_dict(torch.load(file_name + "_model.pt"))
+        self.model.eval()
+
+
+    def plot_training_progress(self, episode): # Function to plot training progress 
+        fig, axs = plt.subplots(3)
+        
+        # Plotting Total Episode Rewards
+        axs[0].plot(self.episodes, self.scores)
+        axs[0].set_title("Total Rewards")
+        axs[0].set_xlabel("Episode")
+        axs[0].set_ylabel("Reward")
+
+        # Plotting Average Rewards
+        axs[1].plot(self.avg_episodes, self.avg_rewards)
+        axs[1].set_title("Average Rewards")
+        axs[1].set_xlabel("Episode")
+        axs[1].set_ylabel("Reward")
+        
+        # Plotting steps 
+        axs[2].plot(self.episodes, self.steps)
+        axs[2].set_title("Steps per episode")
+        axs[2].set_xlabel("Episode")
+        axs[2].set_ylabel("Steps")
+        
+        # Saving Figures
+        plt.tight_layout()
+        name = 'training_curve' + str(episode) +'.png'
+        plt.savefig(name)
