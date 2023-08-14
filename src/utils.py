@@ -24,7 +24,6 @@ class PrioritizedReplayBuffer:
     def store_transition(self, state, action, reward, next_state, done):
         max_priority = max(self.priorities, default=1)  # Default to 1 for the first transition
         self.mem_cntr += 1
-        self.mem_cntr = self.mem_cntr % self.mem_size
         self.transitions.append((state, action, reward, next_state, done))
         self.priorities.append(max_priority)
 
@@ -55,16 +54,17 @@ class AutonomousVehicleEnv(gym.Env):
     def __init__(self):
         super().__init__()
 
-        # Define action space (acceleration: -1, 0, 1)
-        self.action_space = [-1,0,1]
+        self.action_space = [0,1,2]
+        self.high = 500
+        self.low = -10
 
         # Define observation space (distance, relative_speed)
-        self.observation_space = spaces.Box(low=np.array([0, -100]), high=np.array([100, 10]))
+        self.observation_space = spaces.Box(low=np.array([0, self.low]), high=np.array([self.high, 10]))
+        self.goal_distance = self.high 
 
-        self.reset()
-
-                # pygame setup
-        pygame.init()
+        self.reset() # Reset 
+                
+        pygame.init() # pygame setup
         self.screen = pygame.display.set_mode((800, 600))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 36)
@@ -72,40 +72,40 @@ class AutonomousVehicleEnv(gym.Env):
         # car positions and sizes
         self.car_width, self.car_height = 70, 40
         self.leading_car_x = 400
-        self.leading_car_y = 100
+        self.leading_car_y = 50
         self.main_car_x = 400
         self.main_car_y = 500
 
     def reset(self):
         # Initialize distance and relative speed
-        self.distance = np.random.uniform(-30, 70)
+        self.distance = np.random.uniform(self.low, self.high)
         self.relative_speed = np.random.uniform(-5, 5)
         return np.array([self.distance, self.relative_speed])
 
+
     def step(self, action):
+        done = False
         # Previous distance
         prev_distance = self.distance
 
-        acceleration = action - 1  # Map 0, 1, 2 to -1, 0, 1
-
-        # Update state
-        self.relative_speed += acceleration
-        self.distance += self.relative_speed
+        #acceleration = (action - 1) % len(self.action_space)  
+        acceleration = (action - 1)
 
         # Reward calculation
-        if self.distance == 100: # Assumes that 0 is the goal distance
+        if self.distance >= self.goal_distance:  # Assumes that 0 is the goal distance
             reward = 100
+            done = True
         elif self.distance < prev_distance:  # Car got closer to the goal
             reward = 10
+            self.relative_speed += abs(acceleration)
+            self.distance += self.relative_speed
         else:  # Car either stayed in the same position or moved away
             reward = -1
-
-        # Check for terminal conditions, such as collisions or reaching a max episode length
-        done = False
-        if self.distance <= 0: # The car has arrived at or passed the goal
-            done = True
+            self.relative_speed += abs(acceleration)
+            self.distance += self.relative_speed
 
         return np.array([self.distance, self.relative_speed]), reward, done
+
 
 
     def render(self, mode='human'):
@@ -138,6 +138,7 @@ class DeepQNetwork(nn.Module):
         self.layer1 = nn.Linear(input_dims,hidden_layers)
         self.layer2 = nn.Linear(hidden_layers,hidden_layers)
         self.layer3 = nn.Linear(hidden_layers,output_dims)
+        self.device = 'cpu'
 
     def forward(self,x):
         x = F.relu(self.layer1(x))
@@ -170,6 +171,7 @@ class Agent:
         self.beta_end = 1.0 # Store the final beta value
         self.beta_increment = 0.0001 # Slowly increment the beta value 
         self.batch_size = 64 # Assign the batch size
+        
 
     def update_epsilon(self): # Update the epsilon value
         self.epsilon = max(self.epsilon * self.epsilon_dec, self.epsilon_min) 
@@ -178,39 +180,41 @@ class Agent:
         if self.memory.mem_cntr < self.batch_size:
             return
 
-        print('louis')
-        # Step 1: Sample from the prioritized replay buffer
-        states, actions, rewards, next_states, dones, indices, weights = self.memory.sample_buffer(self.batch_size, beta)
+        states, actions, rewards, next_states, dones, indices, weights = self.memory.sample_buffer(self.batch_size, beta=self.beta)
 
-        states = torch.tensor(states, device=self.model.device).float()
-        actions = torch.tensor(actions, device=self.model.device).long()
-        rewards = torch.tensor(rewards, device=self.model.device).float()
-        next_states = torch.tensor(next_states, device=self.model.device).float()
-        dones = torch.tensor(dones, device=self.model.device).bool()
-        weights = torch.tensor(weights, device=self.model.device).float()
+        states = torch.tensor(states).float()
+        actions = torch.tensor(actions).long()
+        rewards = torch.tensor(rewards).float()
+        next_states = torch.tensor(next_states).float()
+        dones = torch.tensor(dones).float()
+        weights = torch.tensor(weights).float()
 
-        # Step 2: Compute Q-values
-        q_eval = self.model(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
-        q_next = self.target(next_states).detach()
-        max_actions = q_next.argmax(dim=1)
-        q_next[dones] = 0.0
-        q_target = rewards + self.gamma * q_next.gather(1, max_actions.unsqueeze(-1)).squeeze(-1)
-
-        # Step 3: Calculate TD errors
-        errors = (q_target - q_eval).detach().cpu().numpy()
-        self.memory.set_priorities(indices, errors)
-
-        # Step 4 & 5: Adjust Q-value updates with importance-sampling weights and calculate the loss
-        loss = self.loss(q_eval, q_target)
-        weighted_loss = (weights * loss).mean()
-
-        # Step 6: Perform gradient descent
         self.optimizer.zero_grad()
-        weighted_loss.backward()
+
+        q_vals = self.model(states)
+        q_action = q_vals.gather(1, actions.unsqueeze(-1)).squeeze(-1)
+
+        next_q_vals = self.model(next_states)
+        max_next_q_vals = next_q_vals.max(1)[0]
+        expected_q_action = rewards + (self.gamma * max_next_q_vals * (1 - dones))
+
+        loss = (q_action - expected_q_action.detach()).pow(2) * weights
+        prios = loss + 1e-5
+        loss = loss.mean()
+
+        loss.backward()
         self.optimizer.step()
 
-        # Step 7: Update beta
+        # Update priorities
+        self.memory.set_priorities(indices, prios.data.cpu().numpy())
+
+        # Increase beta towards 1.0, for prioritized experience replay
         self.beta = min(self.beta + self.beta_increment, self.beta_end)
+
+        # Update epsilon
+        self.update_epsilon()
+
+
 
     def select_action(self, state): # Select action
         if np.random.rand() < self.epsilon: # Epsilon-Greedy
@@ -230,16 +234,16 @@ class Agent:
             steps = 0 # Initial the total steps
 
             while not done: # While not done
-                self.env.render()
+                self.env.render() # render the environment 
                 action = self.select_action(state) # select an action
                 next_state, reward, done = self.env.step(action) # call the step function
-                total_reward = total_reward + reward  # accumulate the rewards
-                self.learn() # call the learn function
-                self.update_epsilon() # update the epsilon value
+                self.memory.store_transition(state, action, reward, next_state, done)
+                total_reward = total_reward + reward  # accumulate the rewards            
                 state = next_state # assign the next state to the current state
                 steps += 1 # increment the steps
                 
-
+                self.learn() # call the learn function
+                #self.update_epsilon() # update the epsilon value
             self.episodes.append(episode+1) # store the episode values
             self.scores.append(total_reward) # store the total reward
             self.steps.append(steps) # store the step value
