@@ -7,6 +7,7 @@ from collections import deque
 import random
 import matplotlib.pyplot as plt 
 import sys
+import time
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
@@ -62,12 +63,19 @@ class Environment:
 
         move = self.directions[action]
         next_pos = [self.car_pos[0] + move[0], self.car_pos[1] + move[1]]
+        new_distance = next_pos[0]
 
         next_row, next_col = next_pos[1] // GRID_SIZE, next_pos[0] // GRID_SIZE
         if (next_row in self.street_rows or next_col in self.street_cols) and 0 <= next_pos[0] < SCREEN_WIDTH and 0 <= next_pos[1] < SCREEN_HEIGHT:
             prev_distance = euclidean_distance(self.car_pos, self.goal_pos)
             self.car_pos = next_pos
             new_distance = euclidean_distance(self.car_pos, self.goal_pos)
+            delta = abs(prev_distance - new_distance) 
+            if new_distance < prev_distance:
+                reward = 2*delta  # Greater reward for bigger reductions in distance
+            else:
+                reward = -delta  # Greater penalty for increasing the distance
+
 
             if self.car_pos == self.goal_pos:
                 return self.car_pos, 1000, True
@@ -168,6 +176,7 @@ class DQNAgent:
             steps = 0
             while not done:
                 action = self.act(state)
+                time.sleep(0.1)
                 next_state, reward, done = env.step(action)
                 self.remember(state, action, reward, next_state, done)
                 state = next_state
