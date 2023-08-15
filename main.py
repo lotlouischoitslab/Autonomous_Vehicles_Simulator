@@ -4,11 +4,14 @@ Author: Louis Sungwoo Cho
 Date Created: 8/11/2023
 '''
 
-from src.utils import Agent 
+from src.utils import DQNAgent, Environment 
 
 def main():
-    louis = Agent(gamma=0.99,epsilon=1.0,epsilon_min=1e-4,epsilon_dec=0.9995,lr=1e-4)
-    louis.train(episodes=100)
+    env = Environment()
+    state_size = 2  # car x, car y
+    action_size = 4 # left, right, up, down
+    agent = DQNAgent(state_size, action_size)
+    agent.train(env, 100)
 
 
 if __name__ =='__main__':

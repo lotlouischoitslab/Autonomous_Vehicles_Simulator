@@ -1,271 +1,204 @@
+import pygame
+import numpy as np
 import torch
-import torch.nn as nn 
-import torch.nn.functional as F 
-import torch.optim as optim 
-import numpy as np 
-import matplotlib.pyplot as plt 
-import random 
-import gym 
-from gym import spaces
+import torch.nn as nn
+import torch.optim as optim
 from collections import deque
-import pygame 
+import random
+import matplotlib.pyplot as plt 
+import sys
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
+# Initialize pygame
+pygame.init()
 
-class PrioritizedReplayBuffer:
-    def __init__(self, max_mem_size, input_dims, n_actions, alpha=0.3):
-        self.mem_size = max_mem_size
-        self.mem_cntr = 0
-        self.alpha = alpha
-        self.transitions = deque(maxlen=max_mem_size)
-        self.priorities = deque(maxlen=max_mem_size)
-    
-    def store_transition(self, state, action, reward, next_state, done):
-        max_priority = max(self.priorities, default=1)  # Default to 1 for the first transition
-        self.mem_cntr += 1
-        self.transitions.append((state, action, reward, next_state, done))
-        self.priorities.append(max_priority)
+# Constants
+GRID_SIZE = 40
+NUM_GRIDS = 15  # So, a 15x15 grid
+SCREEN_WIDTH = GRID_SIZE * NUM_GRIDS
+SCREEN_HEIGHT = GRID_SIZE * NUM_GRIDS
 
-    def sample_buffer(self, batch_size, beta=0.4):
-        # Get the probabilities
-        priorities = np.array(self.priorities, dtype=np.float32)
-        probs = priorities ** self.alpha
-        probs /= probs.sum()
-        
-        # Sample transitions based on their probabilities
-        indices = np.random.choice(len(self.transitions), batch_size, p=probs)
-        samples = [self.transitions[idx] for idx in indices]
+# Colors
+WHITE = (255, 255, 255)
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
 
-        # Calculate importance-sampling weights
-        weights = (len(self.transitions) * probs[indices]) ** (-beta)
-        weights /= weights.max()
-
-        states, actions, rewards, next_states, dones = zip(*samples)
-        return np.array(states), np.array(actions), np.array(rewards), np.array(next_states), np.array(dones), indices, np.array(weights)
-
-    def set_priorities(self, indices, errors, offset=1e-6):
-        # Set the priorities based on TD errors
-        for idx, error in zip(indices, errors):
-            self.priorities[idx] = abs(error) + offset
-
-
-class AutonomousVehicleEnv(gym.Env):
+class Environment:
     def __init__(self):
-        super().__init__()
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption('GridWorld with Streets Simulator')
+        self.directions = [(0, -GRID_SIZE), (GRID_SIZE, 0), (0, GRID_SIZE), (-GRID_SIZE, 0)]  # UP, RIGHT, DOWN, LEFT
+        
+        # Defining street rows and columns
+        self.street_rows = [2, 5, 8, 12]  # for example
+        self.street_cols = [2, 5, 8, 12]  # for example
 
-        self.action_space = [0,1,2]
-        self.high = 500
-        self.low = -10
-
-        # Define observation space (distance, relative_speed)
-        self.observation_space = spaces.Box(low=np.array([0, self.low]), high=np.array([self.high, 10]))
-        self.goal_distance = self.high 
-
-        self.reset() # Reset 
-                
-        pygame.init() # pygame setup
-        self.screen = pygame.display.set_mode((800, 600))
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont(None, 36)
-
-        # car positions and sizes
-        self.car_width, self.car_height = 70, 40
-        self.leading_car_x = 400
-        self.leading_car_y = 50
-        self.main_car_x = 400
-        self.main_car_y = 500
+        
+        self.reset()
 
     def reset(self):
-        # Initialize distance and relative speed
-        self.distance = np.random.uniform(self.low, self.high)
-        self.relative_speed = np.random.uniform(-5, 5)
-        return np.array([self.distance, self.relative_speed])
+        # Ensuring the car starts on a street
+        row = random.choice(self.street_rows) * GRID_SIZE
+        col = random.choice(self.street_cols) * GRID_SIZE
+        self.car_pos = [col, row]
+
+        row_goal = random.choice(self.street_rows) * GRID_SIZE
+        col_goal = random.choice(self.street_cols) * GRID_SIZE
+        self.goal_pos = [col_goal, row_goal]
+
+        while self.car_pos == self.goal_pos:
+            row_goal = random.choice(self.street_rows) * GRID_SIZE
+            col_goal = random.choice(self.street_cols) * GRID_SIZE
+            self.goal_pos = [col_goal, row_goal]
+
+        return self.car_pos
 
 
     def step(self, action):
-        done = False
-        # Previous distance
-        prev_distance = self.distance
+        def euclidean_distance(pos1, pos2):
+            return ((pos1[0] - pos2[0]) ** 2 + (pos1[1] - pos2[1]) ** 2) ** 0.5
 
-        acceleration = (action - 1)
+        move = self.directions[action]
+        next_pos = [self.car_pos[0] + move[0], self.car_pos[1] + move[1]]
 
-        # Reward calculation
-        if self.distance >= self.goal_distance:  # Assumes that 0 is the goal distance
-            reward = 100
-            done = True
-        else:  # Car either stayed in the same position or moved away
-            reward = -1
-            self.relative_speed += abs(acceleration)
-            self.distance += self.relative_speed
+        next_row, next_col = next_pos[1] // GRID_SIZE, next_pos[0] // GRID_SIZE
+        if (next_row in self.street_rows or next_col in self.street_cols) and 0 <= next_pos[0] < SCREEN_WIDTH and 0 <= next_pos[1] < SCREEN_HEIGHT:
+            prev_distance = euclidean_distance(self.car_pos, self.goal_pos)
+            self.car_pos = next_pos
+            new_distance = euclidean_distance(self.car_pos, self.goal_pos)
 
-        return np.array([self.distance, self.relative_speed]), reward, done
+            if self.car_pos == self.goal_pos:
+                return self.car_pos, 1000, True
+            else:
+                reward = -1
+                return self.car_pos, reward, False
+        else:
+            # Penalty for invalid move
+            return self.car_pos, -2, False
 
 
-
-    def render(self, mode='human'):
+    def draw(self, mode='human'):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-
-        # Fill screen
-        self.screen.fill((255, 255, 255))
+        self.screen.fill(GREEN)
         
-        # Draw cars
-        pygame.draw.rect(self.screen, (0, 0, 255), (self.leading_car_x, self.leading_car_y, self.car_width, self.car_height))
-        pygame.draw.rect(self.screen, (255, 0, 0), (self.main_car_x, self.main_car_y - self.distance, self.car_width, self.car_height))
-
-        # Display state info
-        state_text = self.font.render(f"Distance: {self.distance:.2f} m | Relative Speed: {self.relative_speed:.2f} m/s", True, (0, 0, 0))
-        self.screen.blit(state_text, (10, 10))
+        # Drawing the grey streets
+        for row in self.street_rows:
+            pygame.draw.rect(self.screen, (150, 150, 150), (0, GRID_SIZE*row, SCREEN_WIDTH, GRID_SIZE))
         
+        for col in self.street_cols:
+            pygame.draw.rect(self.screen, (150, 150, 150), (GRID_SIZE*col, 0, GRID_SIZE, SCREEN_HEIGHT))
+        
+
+        pygame.draw.rect(self.screen, BLUE, (self.car_pos[0], self.car_pos[1], GRID_SIZE, GRID_SIZE))
+        pygame.draw.rect(self.screen, RED, (self.goal_pos[0], self.goal_pos[1], GRID_SIZE, GRID_SIZE))
         pygame.display.flip()
-        self.clock.tick(30)
-
-    def close(self):
-        pygame.quit()
- 
 
 
-class DeepQNetwork(nn.Module):
-    def __init__(self,input_dims,hidden_layers,output_dims):
-        super(DeepQNetwork,self).__init__()
-        self.layer1 = nn.Linear(input_dims,hidden_layers)
-        self.layer2 = nn.Linear(hidden_layers,hidden_layers)
-        self.layer3 = nn.Linear(hidden_layers,output_dims)
-        self.device = 'cpu'
 
-    def forward(self,x):
-        x = F.relu(self.layer1(x))
-        x = F.relu(self.layer2(x))
-        x = self.layer3(x)
-        return x 
+class QNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(QNetwork, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 24)
+        self.fc2 = nn.Linear(24, 24)
+        self.fc3 = nn.Linear(24, output_dim)
 
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
 
-class Agent:
-    def __init__(self,gamma,epsilon,epsilon_min,epsilon_dec,lr,mem_size=100000000):
-        self.env = AutonomousVehicleEnv() 
-        self.input_dims = self.env.observation_space.shape[0]
-        self.hidden_dims = 128
-        self.output_dims = len(self.env.action_space)
-        self.model = DeepQNetwork(self.input_dims,self.hidden_dims,self.output_dims)
-        self.gamma = gamma 
-        self.epsilon = epsilon
-        self.epsilon_min = epsilon_min
-        self.epsilon_dec = epsilon_dec
-        self.lr = lr 
-        self.loss_fn = nn.MSELoss() 
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr) # Create an optimizer
-        self.memory = PrioritizedReplayBuffer(mem_size, self.input_dims, self.output_dims)
-        self.scores = [] # Store all the total rewards
+class DQNAgent:
+    def __init__(self, state_size, action_size):
+        self.state_size = state_size
+        self.action_size = action_size
+        
+        self.memory = deque(maxlen=100000)
+        
+        self.gamma = 0.99
+        self.epsilon = 1.0
+        self.epsilon_min = 1e-3
+        self.epsilon_decay = 0.995
+        self.learning_rate = 1e-4
+
+        self.model = QNetwork(self.state_size, self.action_size)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.criterion = nn.MSELoss()
+
+        self.rewards = [] # Store all the total rewards
         self.steps = [] # Store all the step values
         self.episodes = [] # Store the episodes
         self.avg_episodes = [1] # Store every 10 episodes for average rewards
         self.avg_rewards = [0.0] # Store all the average values
-        self.beta = 0.4 # Store the initial beta value
-        self.beta_end = 1.0 # Store the final beta value
-        self.beta_increment = 0.0001 # Slowly increment the beta value 
-        self.batch_size = 64 # Assign the batch size
-        
 
-    def update_epsilon(self): # Update the epsilon value
-        self.epsilon = max(self.epsilon * self.epsilon_dec, self.epsilon_min) 
+    def act(self, state):
+        if random.uniform(0, 1) < self.epsilon:
+            return random.randrange(self.action_size)
+        state = torch.FloatTensor(state)
+        q_values = self.model(state)
+        return torch.argmax(q_values).item()
 
-    def learn(self):
-        if self.memory.mem_cntr < self.batch_size:
+    def remember(self, state, action, reward, next_state, done):
+        self.memory.append((state, action, reward, next_state, done))
+
+    def replay(self, batch_size):
+        if len(self.memory) < batch_size:
             return
-
-        states, actions, rewards, next_states, dones, indices, weights = self.memory.sample_buffer(self.batch_size, beta=self.beta)
-
-        states = torch.tensor(states).float()
-        actions = torch.tensor(actions).long()
-        rewards = torch.tensor(rewards).float()
-        next_states = torch.tensor(next_states).float()
-        dones = torch.tensor(dones).float()
-        weights = torch.tensor(weights).float()
-
-        self.optimizer.zero_grad()
-
-        q_vals = self.model(states)
-        q_action = q_vals.gather(1, actions.unsqueeze(-1)).squeeze(-1)
-
-        next_q_vals = self.model(next_states)
-        max_next_q_vals = next_q_vals.max(1)[0]
-        expected_q_action = rewards + (self.gamma * max_next_q_vals * (1 - dones))
-
-        loss = (q_action - expected_q_action.detach()).pow(2) * weights
-        prios = loss + 1e-5
-        loss = loss.mean()
-
-        loss.backward()
-        self.optimizer.step()
-
-        # Update priorities
-        self.memory.set_priorities(indices, prios.data.cpu().numpy())
-
-        # Increase beta towards 1.0, for prioritized experience replay
-        self.beta = min(self.beta + self.beta_increment, self.beta_end)
+        minibatch = random.sample(self.memory, batch_size)
+        for state, action, reward, next_state, done in minibatch:
+            state = torch.FloatTensor(state)
+            next_state = torch.FloatTensor(next_state)
+            target = reward + self.gamma * torch.max(self.model(next_state)).item() * (not done)
+            target = torch.tensor([target], dtype=torch.float32)
+            current = self.model(state)[action].view(1)
+            loss = self.criterion(current, target)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
 
+    def train(self, env, episodes):
+        for episode in range(episodes):
+            state = env.reset()
+            done = False
+            total_reward = 0
+            steps = 0
+            while not done:
+                action = self.act(state)
+                next_state, reward, done = env.step(action)
+                self.remember(state, action, reward, next_state, done)
+                state = next_state
+                total_reward += reward
+                steps += 1
+                env.draw()
+                self.replay(32)
+            
+            if self.epsilon > self.epsilon_min:
+                self.epsilon *= self.epsilon_decay
 
-
-    def select_action(self, state): # Select action
-        if np.random.rand() < self.epsilon: # Epsilon-Greedy
-            return np.random.choice(self.env.action_space)
-        else:
-            q_values = self.model(torch.tensor(state, dtype=torch.float32)) # Get the q-values
-            action = torch.argmax(q_values[0]).item()
-            return action # return the action value
-
-
-    def train(self, episodes): # Train the agent
-        for episode in range(episodes): # Total reward for each episode
-            total_reward = 0 # Initialize the total reward
-            done = False # Terminal condition is set to False
-            state = self.env.reset() # Reset the state 
-            avg_reward = 0 # Initialize the average reward
-            steps = 0 # Initial the total steps
-
-            while not done: # While not done
-                self.env.render() # render the environment 
-                action = self.select_action(state) # select an action
-                next_state, reward, done = self.env.step(action) # call the step function
-                self.memory.store_transition(state, action, reward, next_state, done)
-                total_reward = total_reward + reward  # accumulate the rewards            
-                state = next_state # assign the next state to the current state
-                steps += 1 # increment the steps
-                self.learn() # call the learn function
-                self.update_epsilon()
-                
 
             self.episodes.append(episode+1) # store the episode values
-            self.scores.append(total_reward) # store the total reward
+            self.rewards.append(total_reward) # store the total reward
             self.steps.append(steps) # store the step value
 
             print(f'Episode: {episode+1} | Total Reward: {total_reward} | Epsilon: {self.epsilon}') # print out the variables
 
-            if (episode+1) % 100 == 0: # for each 10 episodes
-                self.save_model(os.path.join('models', 'rl_model' + str(episode+1))) # save the model
+            if (episode+1) % 10 == 0: # for each 10 episodes
+                #self.save_model(os.path.join('models', 'rl_model' + str(episode+1))) # save the model
                 self.avg_episodes.append(episode+1) # store the average rewards
-                avg_reward = np.mean(self.scores[-10:]) # get the mean reward value
+                avg_reward = np.mean(self.rewards[-10:]) # get the mean reward value
                 self.avg_rewards.append(avg_reward) # store the average reward
                 self.plot_training_progress(episode+1) # plot the training progress
                 print(f'Average Reward: {avg_reward}') # print the average reward
-
-
-    def save_model(self, file_name): # Function to save the model
-        torch.save(self.model.state_dict(), file_name + "_model.pt")
-
-    def load_model(self, file_name): # Function to load the model
-        self.model.load_state_dict(torch.load(file_name + "_model.pt"))
-        self.model.eval()
-
-
+        
     def plot_training_progress(self, episode): # Function to plot training progress 
         fig, axs = plt.subplots(3)
         
         # Plotting Total Episode Rewards
-        axs[0].plot(self.episodes, self.scores)
+        axs[0].plot(self.episodes, self.rewards)
         axs[0].set_title("Total Rewards")
         axs[0].set_xlabel("Episode")
         axs[0].set_ylabel("Reward")
@@ -286,3 +219,4 @@ class Agent:
         plt.tight_layout()
         name = 'training_curve' + str(episode) +'.png'
         plt.savefig(name)
+
