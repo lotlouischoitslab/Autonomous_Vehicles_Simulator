@@ -198,6 +198,12 @@ class AVCityEnv(gym.Env):
         self.cp = CarParams()
         self.ep = EnvParams()
         self.rng = np.random.RandomState(seed)
+        self._min_scale = 0.2
+        self._max_scale = 8.0
+        self._panning = False
+        self._pan_start = None  # last mouse pos while panning
+        self._follow_car = False
+
 
         # Track
         if track == "gp":
@@ -236,6 +242,27 @@ class AVCityEnv(gym.Env):
             pygame.init()
 
         self.reset(seed=seed)
+
+    def _zoom_at(self, factor: float, center_px: Optional[tuple] = None):
+        """Zoom keeping the given screen point fixed in world space."""
+        old_scale = self._surf_scale
+        new_scale = float(np.clip(old_scale * factor, self._min_scale, self._max_scale))
+        if abs(new_scale - old_scale) < 1e-9:
+            return
+        if center_px is None:
+            center_px = (self.pygame_screen.get_width() * 0.5, self.pygame_screen.get_height() * 0.5)
+
+        cx, cy = center_px
+        # world point under cursor before zoom
+        world_before = (np.array([cx, cy], dtype=np.float32) - self._origin) / old_scale
+        # update scale
+        self._surf_scale = new_scale
+        # shift origin so that same world point stays under cursor
+        self._origin = np.array([cx, cy], dtype=np.float32) - world_before * self._surf_scale
+
+    def _pan(self, dx: float, dy: float):
+        self._origin += np.array([dx, dy], dtype=np.float32)
+
 
     # --------------- Gym API ---------------
     def seed(self, seed: Optional[int] = None):
@@ -449,9 +476,46 @@ class AVCityEnv(gym.Env):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
+
             elif event.type == pygame.VIDEORESIZE:
-                # Refit to the new window size
-                self._fit_track_to_surface(screen.get_size())
+                self._fit_track_to_surface(self.pygame_screen.get_size())
+
+            elif event.type == pygame.MOUSEWHEEL:
+                # Zoom around mouse cursor (1 step = 10%)
+                mx, my = pygame.mouse.get_pos()
+                self._zoom_at(1.1 ** event.y, (mx, my))
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 2:           # middle mouse: start panning
+                    self._panning = True
+                    self._pan_start = pygame.mouse.get_pos()
+                elif event.button == 1 and event.clicks == 2:
+                    # double-click to refit
+                    self._fit_track_to_surface(self.pygame_screen.get_size())
+
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 2:
+                    self._panning = False
+                    self._pan_start = None
+
+            elif event.type == pygame.MOUSEMOTION and self._panning:
+                x, y = event.pos
+                px, py = self._pan_start
+                self._pan(x - px, y - py)
+                self._pan_start = (x, y)
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_PLUS, pygame.K_EQUALS):
+                    self._zoom_at(1.1, pygame.mouse.get_pos())
+                elif event.key in (pygame.K_MINUS, pygame.K_UNDERSCORE):
+                    self._zoom_at(1/1.1, pygame.mouse.get_pos())
+                elif event.key == pygame.K_0:
+                    # reset view to fit window
+                    self._fit_track_to_surface(self.pygame_screen.get_size())
+                elif event.key == pygame.K_f:
+                    # toggle follow-car camera
+                    self._follow_car = not self._follow_car
+
 
         # If size changed (e.g., DPI/OS moves), refit
         curr_size = screen.get_size()
