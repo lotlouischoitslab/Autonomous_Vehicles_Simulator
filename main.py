@@ -22,7 +22,7 @@ game.fps = 60
 os.makedirs("models", exist_ok=True)
 
 ddqn_agent = DDQNAgent(
-    state_dim=20,       # <- your observation vector length
+    state_dim=19,       # <- your observation vector length
     n_actions=5,        # <- your discrete action count
     gamma=0.99,
     lr=3e-4,

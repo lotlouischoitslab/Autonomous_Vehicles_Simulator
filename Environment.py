@@ -200,9 +200,7 @@ class Car:
         ray16 = Ray(self.p2.x,self.p2.y, self.soll_angle - math.radians(90))
 
         ray17 = Ray(self.p1.x,self.p1.y, self.soll_angle + math.radians(0))
-        ray18 = Ray(self.p2.x,self.p2.y, self.soll_angle - math.radians(0))
-        
-        ray19 = Ray(self.x, self.y, self.soll_angle + math.radians(5))
+        ray18 = Ray(self.p2.x,self.p2.y, self.soll_angle - math.radians(0)) 
 
         self.rays = []
         self.rays.append(ray1)
@@ -225,8 +223,7 @@ class Car:
         self.rays.append(ray16)
 
         self.rays.append(ray17)
-        self.rays.append(ray18)
-        self.rays.append(ray19)
+        self.rays.append(ray18) 
 
 
         observations = []
