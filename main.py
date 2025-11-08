@@ -22,7 +22,7 @@ game.fps = 60
 os.makedirs("models", exist_ok=True)
 
 ddqn_agent = DDQNAgent(
-    state_dim=19,       # <- your observation vector length
+    state_dim=20,       # <- your observation vector length
     n_actions=5,        # <- your discrete action count
     gamma=0.99,
     lr=3e-4,
@@ -54,7 +54,7 @@ def run():
         counter = 0
 
         # your env returns (obs, reward, done) when stepping; get first obs by a no-op
-        observation_, reward, done = game.step(0)
+        observation_, reward, done = game.step(0) 
         observation = np.array(observation_, dtype=np.float32)
 
         gtime = 0
@@ -68,8 +68,7 @@ def run():
                     return
 
             # epsilon-greedy action from online net
-            action = ddqn_agent.act(observation)
-
+            action = ddqn_agent.act(observation) 
             observation_, reward, done = game.step(action)
             observation_ = np.array(observation_, dtype=np.float32)
 

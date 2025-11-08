@@ -201,6 +201,8 @@ class Car:
 
         ray17 = Ray(self.p1.x,self.p1.y, self.soll_angle + math.radians(0))
         ray18 = Ray(self.p2.x,self.p2.y, self.soll_angle - math.radians(0))
+        
+        ray19 = Ray(self.x, self.y, self.soll_angle + math.radians(5))
 
         self.rays = []
         self.rays.append(ray1)
@@ -224,6 +226,7 @@ class Car:
 
         self.rays.append(ray17)
         self.rays.append(ray18)
+        self.rays.append(ray19)
 
 
         observations = []
@@ -379,15 +382,14 @@ class RacingEnv:
 
 
     def reset(self):
-        self.screen.fill((0, 0, 0))
-
+        self.screen.fill((0, 0, 0)) 
         self.car = Car(50, 300)
         self.walls = getWalls()
         self.goals = getGoals()
         self.game_reward = 0
 
-    def step(self, action):
 
+    def step(self, action): 
         done = False
         self.car.action(action)
         self.car.update()
@@ -396,7 +398,6 @@ class RacingEnv:
         # Check if car passes Goal and scores
         index = 1
         for goal in self.goals:
-            
             if index > len(self.goals):
                 index = 1
             if goal.isactiv:
@@ -420,8 +421,8 @@ class RacingEnv:
 
         return new_state, reward, done
 
-    def render(self, action):
 
+    def render(self, action):
         DRAW_WALLS = False
         DRAW_GOALS = False
         DRAW_RAYS = False
