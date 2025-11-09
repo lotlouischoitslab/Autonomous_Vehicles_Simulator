@@ -4,7 +4,7 @@ import pygame
 import random, math
 import Environment
 
-from Double_Deep_Q import DDQNAgent, set_seed  # <-- use the PyTorch agent
+from Double_Deep_Q import DDQNAgent, set_seed   
 
 TOTAL_GAMETIME = 1000
 N_EPISODES = 10000
@@ -25,7 +25,7 @@ ddqn_agent = DDQNAgent(
     state_dim=19,       # <- your observation vector length
     n_actions=5,        # <- your discrete action count
     gamma=0.99,
-    lr=3e-4,
+    lr=1e-4,
     batch_size=512,
     tau=0.005,                # soft target update (done inside learn)
     eps_start=1.0,

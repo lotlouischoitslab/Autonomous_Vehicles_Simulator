@@ -1,10 +1,10 @@
+import numpy as np
 import math
 import random
 import time
 from collections import deque, namedtuple
 from typing import List, Tuple
-
-import numpy as np
+ 
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -33,7 +33,6 @@ class ReplayBuffer:
         self.mem_cntr = 0
         self.buffer = deque(maxlen=capacity)
         self.state_dim = int(state_dim)
-
  
 
     def sample_buffer(self, batch_size):
@@ -68,20 +67,19 @@ class DuelingMLP(nn.Module):
         self.advantage = nn.Sequential(
             nn.Linear(hidden[1], hidden[1]),
             nn.SiLU(),
-            nn.Linear(hidden[1], n_actions)  # linear head (no softmax!)
+            nn.Linear(hidden[1], n_actions)   
         )
         self.value = nn.Sequential(
             nn.Linear(hidden[1], hidden[1]),
             nn.SiLU(),
-            nn.Linear(hidden[1], 1)          # state-value
+            nn.Linear(hidden[1], 1)           
         )
 
     def forward(self, x):  # x: [B, state_dim]
         z = self.feature(x)
-        adv = self.advantage(z)              # [B, A]
-        val = self.value(z)                  # [B, 1]
-        # Dueling combine: Q = V + (A - mean(A))
-        q = val + adv - adv.mean(dim=1, keepdim=True)
+        adv = self.advantage(z)               
+        val = self.value(z)                   
+        q = val + adv - adv.mean(dim=1, keepdim=True) # Dueling combine: Q = V + (A - mean(A))
         return q
 
 
@@ -93,8 +91,7 @@ class EpsilonScheduler:
         self.eps_decay_steps = eps_decay_steps
         self.step = 0
 
-    def value(self):
-        # exponential schedule is common, here linear is fine:
+    def value(self): 
         frac = min(1.0, self.step / self.eps_decay_steps)
         return self.eps_start + frac * (self.eps_end - self.eps_start)
 
