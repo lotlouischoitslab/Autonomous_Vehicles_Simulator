@@ -6,7 +6,7 @@
 ### Attribution
 This project is adapted from:
 
-      CodeAndAction (2021). (*DDQN-Car-Racing*)![https://github.com/CodeAndAction/DDQN-Car-Racing]. GitHub.  
+      CodeAndAction (2021). !(*DDQN-Car-Racing*)[https://github.com/CodeAndAction/DDQN-Car-Racing]. GitHub.  
       
 
  
