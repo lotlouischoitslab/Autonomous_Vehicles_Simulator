@@ -10,28 +10,45 @@ TOTAL_GAMETIME = 1000
 N_EPISODES = 10000
 
 # training knobs
-WARMUP_STEPS = 2000         # collect transitions before learning
+WARMUP_STEPS = 10_000         # collect transitions before learning
 TRAIN_EVERY = 1             # learn each step once buffer is warm
 SAVE_EVERY_EP = 10
 RENDER_EVERY_EP = 10
 
-# ---- init ----
+
+
+# Model Parameters
+STATES=19,       # <- your observation vector length
+ACTIONS=5,        # <- your discrete action count
+GAMMA=0.99, 
+LR = 1e-4
+BATCH_SIZE=512              # soft target update (done inside learn) 
+TAU = 0.005
+EPS_START=1.0
+EPS_END=0.05
+EPS_DECAY_STEPS=300_000
+BUFFER_CAPACITY = 100_000 
+GRAD_CLIP_NORM=10.0,
+SEED=42,
+
+
+ 
 set_seed(42)
 game = Environment.RacingEnv()
 game.fps = 60
 os.makedirs("models", exist_ok=True)
 
 ddqn_agent = DDQNAgent(
-    state_dim=19,       # <- your observation vector length
-    n_actions=5,        # <- your discrete action count
-    gamma=0.99,
-    lr=1e-4,
-    batch_size=512,
-    tau=0.005,                # soft target update (done inside learn)
-    eps_start=1.0,
-    eps_end=0.10,
-    eps_decay_steps=500_000,
-    buffer_capacity=100_000,
+    state_dim=STATES,       # <- your observation vector length
+    n_actions=ACTIONS,        # <- your discrete action count
+    gamma=GAMMA,
+    lr=LR,
+    batch_size=BATCH_SIZE,
+    tau=TAU,                # soft target update (done inside learn)
+    eps_start=EPS_START,
+    eps_end=EPS_END,
+    eps_decay_steps=EPS_DECAY_STEPS,
+    buffer_capacity=BUFFER_CAPACITY,
     grad_clip_norm=10.0,
     seed=42,
     device=None,
